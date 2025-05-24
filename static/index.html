@@ -1,1 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader</title>
+    <style>
+                body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #ff0000;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        input, select, button {
+            width: 100%;
+            padding: 12px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        button {
+            background-color: #ff0000;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #cc0000;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 4px;
+        }
+        .status-info {
+            background-color: #e7f3fe;
+            color: #0c5460;
+        }
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .progress-container {
+            margin-top: 20px;
+            display: none;
+        }
+        .progress-bar {
+            height: 20px;
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        .progress {
+            height: 100%;
+            background-color: #4CAF50;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .progress-details {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            color: #555;
+        }
+        #save-location {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #555;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .quality-option { display: flex; margin: 10px 0; }
+        .quality-option input { width: auto; margin-right: 10px; }
+        .quality-label { flex-grow: 1; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YouTube Video Downloader</h1>
+        <div class="input-group">
+            <input type="text" id="youtube-url" placeholder="https://www.youtube.com/watch?v=...">
+        </div>
+        
+        <div class="input-group">
+            <div class="quality-option">
+                <input type="radio" id="q480" name="quality" value="480">
+                <label class="quality-label" for="q480">480p</label>
+            </div>
+            <div class="quality-option">
+                <input type="radio" id="q720" name="quality" value="720" checked>
+                <label class="quality-label" for="q720">720p (HD)</label>
+            </div>
+            <div class="quality-option">
+                <input type="radio" id="q1080" name="quality" value="1080">
+                <label class="quality-label" for="q1080">1080p (Full HD)</label>
+            </div>
+        </div>
+        
+        <button id="download-btn">Download</button>
+        <div id="status"></div>
+        <div class="progress-container" id="progress-container">
+            <div class="progress-bar">
+                <div class="progress" id="progress-bar"></div>
+            </div>
+            <div class="progress-details">
+                <span id="progress-percent">0%</span>
+                <span id="progress-speed">Speed: N/A</span>
+                <span id="progress-eta">ETA: N/A</span>
+            </div>
+        </div>
+    </div>
 
+    <script>
+        const downloadBtn = document.getElementById('download-btn');
+        const statusDiv = document.getElementById('status');
+        const urlInput = document.getElementById('youtube-url');
+        
+        downloadBtn.addEventListener('click', async () => {
+            const url = urlInput.value.trim();
+            const quality = document.querySelector('input[name="quality"]:checked').value;
+            const videoId = Date.now().toString();
+            
+            if (!url) {
+                showStatus('Please enter a YouTube URL', 'error');
+                return;
+            }
+
+            downloadBtn.disabled = true;
+            showStatus('Preparing download...', 'info');
+            
+            try {
+                // Start progress polling
+                const progressInterval = setInterval(updateProgress, 1000);
+                
+                // Start download
+                const response = await fetch('/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, quality, video_id: videoId })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Download failed');
+                }
+
+                // Stream the response
+                const blob = await response.blob();
+                const downloadUrl = URL.createObjectURL(blob);
+                
+                // Create filename
+                const contentDisposition = response.headers.get('content-disposition');
+                let filename = `youtube_video_${quality}p.mp4`;
+                if (contentDisposition) {
+                    const match = contentDisposition.match(/filename="(.+?)"/);
+                    if (match) filename = match[1];
+                }
+
+                // Trigger download
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = filename;
+                a.click();
+                
+                showStatus('Download complete!', 'success');
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+                console.error(error);
+            } finally {
+                downloadBtn.disabled = false;
+            }
+        });
+
+        async function updateProgress() {
+            // Implement progress updates from server
+            // (Use your existing progress tracking logic)
+        }
+
+        function showStatus(message, type = 'info') {
+            statusDiv.textContent = message;
+            statusDiv.className = `status-${type}`;
+            statusDiv.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
