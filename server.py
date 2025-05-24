@@ -1,4 +1,6 @@
 import os
+import re
+import uuid
 import tempfile
 from flask import Flask, request, jsonify, send_from_directory, Response
 import yt_dlp
@@ -22,6 +24,18 @@ def progress_hook(d):
                 'eta': d.get('_eta_str', 'N/A')
             }
 
+def validate_youtube_url(url):
+    """Validate YouTube URL with comprehensive patterns"""
+    patterns = [
+        r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/watch\?v=[\w-]+',
+        r'(https?://)?(www\.)?youtu\.be/[\w-]+',
+        r'(https?://)?(www\.)?youtube\.com/embed/[\w-]+',
+        r'(https?://)?(www\.)?youtube\.com/v/[\w-]+',
+        r'(https?://)?(www\.)?youtube\.com/playlist\?list=[\w-]+',
+        r'(https?://)?(www\.)?youtube\.com/shorts/[\w-]+'
+    ]
+    return any(re.match(pattern, url) for pattern in patterns)
+
 @app.route('/')
 def serve_frontend():
     return send_from_directory(app.static_folder, 'index.html')
@@ -29,13 +43,24 @@ def serve_frontend():
 @app.route('/download', methods=['POST'])
 def download_video():
     try:
-        data = request.json
-        url = data['url']
-        quality = data['quality']
-        video_id = data['video_id']
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid request data'}), 400
 
-        if not url or not all(x in url for x in ('youtube.com', 'youtu.be')):
-            return jsonify({'error': 'Invalid YouTube URL'}), 400
+        url = data.get('url', '').strip()
+        quality = data.get('quality', '720')
+        video_id = data.get('video_id', str(uuid.uuid4()))
+
+        # Enhanced URL validation
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+
+        if not validate_youtube_url(url):
+            return jsonify({'error': 'Invalid YouTube URL format. Supported formats:\n'
+                              '- https://www.youtube.com/watch?v=VIDEO_ID\n'
+                              '- https://youtu.be/VIDEO_ID\n'
+                              '- https://www.youtube.com/embed/VIDEO_ID\n'
+                              '- https://www.youtube.com/playlist?list=PLAYLIST_ID'}), 400
 
         ydl_opts = {
             'format': get_format(quality),
@@ -48,24 +73,26 @@ def download_video():
 
         def generate():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                filename = ydl.prepare_filename(info)
-                
-                # Stream the file in chunks
-                with open(filename, 'rb') as f:
-                    while chunk := f.read(1024 * 1024):  # 1MB chunks
-                        yield chunk
-                
-                # Cleanup
                 try:
-                    os.remove(filename)
-                except:
-                    pass
+                    info = ydl.extract_info(url, download=True)
+                    filename = ydl.prepare_filename(info)
+                    
+                    with open(filename, 'rb') as f:
+                        while chunk := f.read(1024 * 1024):  # 1MB chunks
+                            yield chunk
+                finally:
+                    # Cleanup
+                    try:
+                        os.remove(filename)
+                    except:
+                        pass
 
         return Response(generate(), mimetype='video/mp4')
 
+    except yt_dlp.utils.DownloadError as e:
+        return jsonify({'error': f'YouTube download error: {str(e)}'}), 400
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 def get_format(quality):
     return {
